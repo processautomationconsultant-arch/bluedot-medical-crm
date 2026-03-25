@@ -1,0 +1,418 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+}
+
+// ============================================
+// MODEL 1: bluedot_transfer_case (Main)
+// ============================================
+model bluedot_transfer_case {
+  id                          String    @id @default(cuid())
+  case_id                     String    @unique // Auto: BDC-XXXX
+  state                       String    @default("new") // new, active, on_hold, cancelled, closed
+  is_archived                 Boolean   @default(false)
+
+  // Patient Info
+  patient_name                String
+  patient_age                 Int?
+  patient_gender              String?   // male, female, other
+  patient_nationality         String?
+  patient_passport_number     String?   // ENCRYPTED
+  patient_passport_validity   DateTime?
+  patient_diagnosis           String?   // ENCRYPTED
+  patient_location            String?   // hospital, home, other
+  patient_address             String?
+  patient_drop_off_location   String?
+  patient_category            String?   // adult, pediatric, neonate
+
+  // Transfer Details
+  zone                        String?   // zone_1, zone_2, zone_3
+  transfer_type               String?   // aa, me, ga, ta, cf
+  transfer_class              String?   // int, me, ext, ga, ta, stcr, bcwa, ecwa, fcwa
+  planned_transfer_date       DateTime?
+  source                      String?   // doh, dha, bluedot, other
+
+  // Origin / Destination
+  origin_country              String?
+  origin_city                 String?
+  destination_country         String?
+  destination_city            String?
+  destination_address         String?
+  destination_type            String?   // hospital, home, airport, other
+
+  // Flight Info
+  airlines                    String?
+  flight_number               String?
+  flight_etd                  DateTime?
+  flight_eta                  DateTime?
+  flight_brief                Boolean   @default(false)
+  flight_brief_url            String?
+  emirates_skywards           String?
+  departure_icao_code         String?
+  arrival_icao_code           String?
+
+  // Medical Mission (Flight Brief)
+  care_mission_level          String?   // bls, acls, critical
+  isolation_required          Boolean   @default(false)
+  transmission_precaution     String?   // standard, airborne, droplet, none
+  mission_mode                String?   // airport_to_airport, bed_to_bed, other
+  rendezvous_point            String?
+
+  // Crew (FK)
+  doctor_id                   String?
+  doctor                      bluedot_staff? @relation("doctor_cases", fields: [doctor_id], references: [id])
+  nurse_id                    String?
+  nurse                       bluedot_staff? @relation("nurse_cases", fields: [nurse_id], references: [id])
+
+  // Management (FK)
+  case_manager_id             String?
+  case_manager                bluedot_staff? @relation("cm_cases", fields: [case_manager_id], references: [id])
+  sales_executive_id          String?
+  sales_executive             bluedot_staff? @relation("sales_cases", fields: [sales_executive_id], references: [id])
+
+  // Status Tracking
+  current_status              String?   // pending_documents, pending_payment, etc.
+
+  // Visa & Compliance
+  visa_overstay_fines_police  String?
+  medif_original              Boolean   @default(false)
+  pre_transfer_mails          Boolean   @default(false)
+
+  // Relative Info
+  relative_name               String?
+  relative_relation           String?
+  relative_contact_number     String?   // ENCRYPTED
+
+  // ME Details
+  me_hotel_booking_status     String?   // not_required, pending, booked, checked_in
+  me_hotel_name               String?
+  me_hotel_address            String?
+  me_hotel_contact            String?
+  me_return_flight_status     String?   // not_required, pending, booked, confirmed
+  me_eta_to_base              DateTime?
+  transfer_completion_mail    Boolean   @default(false)
+
+  // Escort Transport
+  escort_transport_company    String?
+  escort_transport_driver     String?
+  escort_transport_contact    String?
+
+  // Template / Duplication
+  is_template                 Boolean   @default(false)
+  template_name               String?
+  duplicated_from_id          String?
+
+  // Urgency (computed, updated via trigger/middleware)
+  urgency_priority            Int?      // 1=overdue, 2=critical(<6h), 3=urgent(6-24h), 4=attention(24-48h), 5=upcoming(48-72h), 6=planned(>72h)
+
+  // Remarks
+  remarks                     String?
+
+  // Audit timestamps (Odoo convention)
+  create_date                 DateTime  @default(now())
+  write_date                  DateTime  @updatedAt
+  create_uid                  String?
+  write_uid                   String?
+
+  // Relations
+  departure_port              bluedot_departure_port?
+  arrival_port                bluedot_arrival_port?
+  amc                         bluedot_amc?
+  sending_facility            bluedot_sending_facility?
+  receiving_facility          bluedot_receiving_facility?
+  documents                   bluedot_case_document[]
+  expenses                    bluedot_expense[]
+  logs                        bluedot_case_log[]
+  timeline                    bluedot_case_timeline[]
+  notifications               bluedot_notification[]
+
+  @@map("bluedot_transfer_case")
+}
+
+// ============================================
+// MODEL 2: bluedot_staff
+// ============================================
+model bluedot_staff {
+  id              String    @id @default(cuid())
+  staff_id        String    @unique // Auto: BDS-XXX
+  name            String
+  role            String    // doctor, nurse, paramedic, case_manager, sales
+  email           String?   @unique
+  phone           String?
+  is_active       Boolean   @default(true)
+  user_id         String?   // Link to Supabase Auth user
+
+  create_date     DateTime  @default(now())
+  write_date      DateTime  @updatedAt
+
+  // Relations
+  doctor_cases    bluedot_transfer_case[] @relation("doctor_cases")
+  nurse_cases     bluedot_transfer_case[] @relation("nurse_cases")
+  cm_cases        bluedot_transfer_case[] @relation("cm_cases")
+  sales_cases     bluedot_transfer_case[] @relation("sales_cases")
+  amc_booked_by   bluedot_amc[]
+
+  @@map("bluedot_staff")
+}
+
+// ============================================
+// MODEL 3: bluedot_departure_port
+// ============================================
+model bluedot_departure_port {
+  id                      String    @id @default(cuid())
+  case_id                 String    @unique
+  case                    bluedot_transfer_case @relation(fields: [case_id], references: [id], onDelete: Cascade)
+
+  departure_port          String?
+  passport_status         String?   // valid, expired, pending
+  visa_status             String?   // valid, expired, overstay, not_required
+  overstay_or_fine        String?   // none, overstay, fine, both
+  police_case             String?   // none, active, cleared
+  co_passenger            String?
+  co_passenger_contact    String?   // ENCRYPTED
+  ground_transfer_type    String?   // ambulance, wheelchair, stretcher, walk
+  ambulance_required      Boolean   @default(false)
+  ambulance_provider      String?
+  ambulance_date_time     DateTime?
+  ambulance_provider_phone String?
+  ga_departure_name       String?
+  driver_name             String?
+  driver_backup_number    String?
+  remarks                 String?
+
+  create_date             DateTime  @default(now())
+  write_date              DateTime  @updatedAt
+
+  @@map("bluedot_departure_port")
+}
+
+// ============================================
+// MODEL 4: bluedot_arrival_port
+// ============================================
+model bluedot_arrival_port {
+  id                      String    @id @default(cuid())
+  case_id                 String    @unique
+  case                    bluedot_transfer_case @relation(fields: [case_id], references: [id], onDelete: Cascade)
+
+  destination             String?   // hospital, home, airport
+  destination_address     String?
+  ground_transfer_type    String?
+  ambulance_required      Boolean   @default(false)
+  ambulance_provider      String?
+  ambulance_provider_phone String?
+  ga_arrival_name         String?
+  driver_name             String?
+  driver_backup_number    String?
+  remarks                 String?
+
+  create_date             DateTime  @default(now())
+  write_date              DateTime  @updatedAt
+
+  @@map("bluedot_arrival_port")
+}
+
+// ============================================
+// MODEL 5: bluedot_amc
+// ============================================
+model bluedot_amc {
+  id              String    @id @default(cuid())
+  case_id         String    @unique
+  case            bluedot_transfer_case @relation(fields: [case_id], references: [id], onDelete: Cascade)
+
+  status          String?   // not_required, pending, booked, completed
+  booked_date     DateTime?
+  payment         Float?
+  booked_by_id    String?
+  booked_by       bluedot_staff? @relation(fields: [booked_by_id], references: [id])
+  booked_through  String?
+  amc_attendant   String?
+  amc_charges     Float?
+
+  create_date     DateTime  @default(now())
+  write_date      DateTime  @updatedAt
+
+  @@map("bluedot_amc")
+}
+
+// ============================================
+// MODEL 6: bluedot_sending_facility
+// ============================================
+model bluedot_sending_facility {
+  id                          String    @id @default(cuid())
+  case_id                     String    @unique
+  case                        bluedot_transfer_case @relation(fields: [case_id], references: [id], onDelete: Cascade)
+
+  facility_name               String?
+  street                      String?
+  city                        String?
+  country                     String?
+  physician_first_name        String?
+  physician_last_name         String?
+  physician_contact           String?
+  physician_emergency_dept    String?
+
+  create_date                 DateTime  @default(now())
+  write_date                  DateTime  @updatedAt
+
+  @@map("bluedot_sending_facility")
+}
+
+// ============================================
+// MODEL 7: bluedot_receiving_facility
+// ============================================
+model bluedot_receiving_facility {
+  id                          String    @id @default(cuid())
+  case_id                     String    @unique
+  case                        bluedot_transfer_case @relation(fields: [case_id], references: [id], onDelete: Cascade)
+
+  facility_name               String?
+  street                      String?
+  city                        String?
+  country                     String?
+  physician_first_name        String?
+  physician_last_name         String?
+  physician_contact           String?
+  physician_emergency_dept    String?
+
+  create_date                 DateTime  @default(now())
+  write_date                  DateTime  @updatedAt
+
+  @@map("bluedot_receiving_facility")
+}
+
+// ============================================
+// MODEL 8: bluedot_case_document
+// ============================================
+model bluedot_case_document {
+  id              String    @id @default(cuid())
+  case_id         String
+  case            bluedot_transfer_case @relation(fields: [case_id], references: [id], onDelete: Cascade)
+
+  document_type   String    // 24 types (equipment_carrying_form, medif, passport, etc.)
+  category        String    // patient, travel
+  file_name       String
+  file_url        String
+  file_size       Int?
+  mime_type       String?
+  uploaded_by     String?
+  upload_date     DateTime  @default(now())
+  remarks         String?
+  is_archived     Boolean   @default(false)
+
+  create_date     DateTime  @default(now())
+  write_date      DateTime  @updatedAt
+
+  @@map("bluedot_case_document")
+}
+
+// ============================================
+// MODEL 9: bluedot_expense
+// ============================================
+model bluedot_expense {
+  id                String    @id @default(cuid())
+  case_id           String
+  case              bluedot_transfer_case @relation(fields: [case_id], references: [id], onDelete: Cascade)
+
+  expense_type      String    // pre_transfer, post_transfer
+  date              DateTime?
+  description       String?
+  expense_category  String?   // transport, accommodation, medical, food, misc
+  amount_aed        Float
+  attachment_url    String?
+  note              String?
+  is_archived       Boolean   @default(false)
+
+  create_date       DateTime  @default(now())
+  write_date        DateTime  @updatedAt
+
+  @@map("bluedot_expense")
+}
+
+// ============================================
+// MODEL 10: bluedot_case_log (IMMUTABLE)
+// ============================================
+model bluedot_case_log {
+  id              String    @id @default(cuid())
+  case_id         String?
+  case            bluedot_transfer_case? @relation(fields: [case_id], references: [id])
+
+  user_id         String?
+  action          String    // create, update, status_change, document_upload, document_view, document_download, login, export, bulk_action
+  field_changed   String?
+  old_value       String?
+  new_value       String?
+  ip_address      String?
+  user_agent      String?
+  timestamp       DateTime  @default(now())
+
+  @@map("bluedot_case_log")
+}
+
+// ============================================
+// MODEL 11: bluedot_case_timeline
+// ============================================
+model bluedot_case_timeline {
+  id              String    @id @default(cuid())
+  case_id         String
+  case            bluedot_transfer_case @relation(fields: [case_id], references: [id], onDelete: Cascade)
+
+  user_id         String?
+  entry_type      String    // note, call, email, status_update, system
+  content         String
+  is_pinned       Boolean   @default(false)
+  timestamp       DateTime  @default(now())
+
+  @@map("bluedot_case_timeline")
+}
+
+// ============================================
+// MODEL 12: bluedot_notification
+// ============================================
+model bluedot_notification {
+  id                  String    @id @default(cuid())
+  user_id             String
+  case_id             String?
+  case                bluedot_transfer_case? @relation(fields: [case_id], references: [id])
+
+  notification_type   String    // status_change, document_upload, assignment, transfer_reminder, document_expiry, system
+  title               String
+  message             String
+  is_read             Boolean   @default(false)
+  is_email_sent       Boolean   @default(false)
+  timestamp           DateTime  @default(now())
+
+  @@map("bluedot_notification")
+}
+
+// ============================================
+// MODEL 13: bluedot_saved_filter
+// ============================================
+model bluedot_saved_filter {
+  id              String    @id @default(cuid())
+  user_id         String
+  name            String
+  filter_config   String    // JSON string
+  is_default      Boolean   @default(false)
+
+  create_date     DateTime  @default(now())
+  write_date      DateTime  @updatedAt
+
+  @@map("bluedot_saved_filter")
+}
+
+// ============================================
+// MODEL 14: bluedot_dashboard_cache
+// ============================================
+model bluedot_dashboard_cache {
+  id              String    @id @default(cuid())
+  cache_key       String    @unique
+  data            String    // JSON string
+  last_synced     DateTime  @default(now())
+  next_sync       DateTime
+  synced_by       String    @default("auto") // auto, manual
+
+  @@map("bluedot_dashboard_cache")
+}
